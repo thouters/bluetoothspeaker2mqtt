@@ -1,0 +1,92 @@
+#!/bin/bash
+# put into  $HOME/.config/mosquitto_pub onto (separate lines, no spaces at the ends!)
+# -h hostname
+# -u mqtt
+# -P mqttpassword
+# apt install expect mosquitto-clients # unbuffer, mosquitto_*
+set -e
+MAC=$(sed -n '/device/s/[^"]*"\([^"]*\)"/\1/p' /etc/asound.conf)
+: "${TOPIC_STATE:=bluetoothspeaker2mqtt/myspeaker/state}"
+: "${TOPIC_SET:=bluetoothspeaker2mqtt/myspeaker/set}"
+: "${SNAPCLIENT_SERVICE:=snapclient-bluetooth}"
+: "${STARTSTOP_SNAPCLIENT:=yes}"
+: "${BUTTONWATCHER_SERVICE:=bluetoothspeaker-buttonwatcher}"
+: "${STARTSTOP_BUTTONWATCHER:=yes}"
+: "${POST_CONNECT_SETTLE_TIME:=1}"
+
+function bluetooth_event_listener()
+{
+  MATCH=0
+  ( while true; do sleep 1; done) | unbuffer bluetoothctl | while read -r line
+  do
+	# A little state machine: scan the output for the device MAC
+        echo "<recv> $line"
+        if echo "$line" | grep -qE "Device ([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"
+        then
+                if echo "$line" | grep -q "Device ${MAC}"
+                then
+			echo "Info about the device detected"
+                        MATCH=1
+                else
+                        MATCH=0
+                fi
+        fi
+        if [[ "$MATCH" = 1 ]]
+        then
+                if echo "$line" |grep -q "Connected: yes"
+                then
+                        echo Connected!
+                        mosquitto_pub -t "${TOPIC_STATE}" -m on
+			sleep "$POST_CONNECT_SETTLE_TIME"
+        		[[ "$STARTSTOP_SNAPCLIENT" = yes ]] && systemctl start "${SNAPCLIENT_SERVICE}"
+        		[[ "$STARTSTOP_BUTTONWATCHER" = yes ]] && systemctl start "${BUTTONWATCHER_SERVICE}"
+                fi
+                if echo "$line" |grep -q "Connected: no"
+                then
+                        echo Disconnected!
+                        mosquitto_pub -t "${TOPIC_STATE}" -m off
+        		[[ "$STARTSTOP_SNAPCLIENT" = yes ]] && systemctl stop "${SNAPCLIENT_SERVICE}"
+        		[[ "$STARTSTOP_BUTTONWATCHER" = yes ]] && systemctl stop "${BUTTONWATCHER_SERVICE}"
+                fi
+        fi
+  done
+}
+
+function bluetoothctl_cmd()
+{
+  echo "<send> $1"
+  printf "%s\n\n" "$1" | bluetoothctl
+}
+
+
+function mqtt_listener()
+{
+mosquitto_sub -t "${TOPIC_SET}" -v |while read -r message
+do
+    topic=$(echo "$message"|cut -d' ' -f 1)
+    payload=$(echo "$message"|cut -d' ' -f 2)
+    echo "<mqtt recv> topic ${topic}/${payload}"
+    case $topic in
+      "${TOPIC_SET}")
+        case $payload in
+        on)
+            bluetoothctl_cmd "connect $MAC"
+        ;;
+        off)
+            bluetoothctl_cmd "disconnect $MAC"
+        ;;
+        *)
+            echo "invalid command $payload"
+        ;;
+        esac
+
+        ;;
+      *)
+        echo "Not implemented $topic"
+        ;;
+    esac
+done
+}
+bluetooth_event_listener &
+mqtt_listener &
+wait

@@ -1,0 +1,13 @@
+[Unit]
+Description=Snapcast client
+After=network.target sound.target
+Wants=avahi-daemon.service
+
+[Service]
+EnvironmentFile=-/etc/default/snapclient-bluetooth
+Type=simple
+ExecStart=/usr/bin/snapclient $SNAPCLIENT_OPTS
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,48 @@
+#!/bin/bash
+# put into  $HOME/.config/mosquitto_pub onto (separate lines, no spaces at the ends!)
+# -h hostname
+# -u mqtt
+# -P mqttpassword
+# apt install expect mosquitto-clients # unbuffer, mosquitto_*
+set -ex
+: "${TOPIC_BUTTON:=bluetoothspeaker2mqtt/myspeaker/button}"
+: "${SPEAKER_NAME:="MY SPEAKER"}"
+[[ $EUID -eq 0 ]] || (echo "need root to cat /proc/bus/..." ; exit 1)
+MATCH=0
+DEVICEFILE=""
+while read -r line
+do
+	echo "$line"
+        if echo "$line" | grep -q "N: Name=\"${SPEAKER_NAME}\""
+        then
+		MATCH=1
+	fi
+
+	if [[ "$MATCH" = 1 ]]
+	then
+		if echo "$line" | grep -q "H: Handlers=kbd"
+		then
+			#H: Handlers=kbd event1
+			# shellcheck disable=SC2086
+			EVENTID="$(echo ${line} | cut -d " " -f 3)"
+			DEVICEFILE="/dev/input/${EVENTID}"
+			break
+		fi
+	fi
+done <<< "$(cat /proc/bus/input/devices)"
+echo "will listen to $DEVICEFILE"
+test -z "${DEVICEFILE}" && (echo Device not found! ; exit 1)
+unbuffer evtest "${DEVICEFILE}" | while read -r line
+do
+	echo "$line"
+	if echo "$line" |grep -q "value 1"
+	then
+		echo button on
+		mosquitto_pub -t "${TOPIC_BUTTON}" -m on
+	fi
+	if echo "$line" |grep -q "value 0"
+	then
+		echo button off
+		mosquitto_pub -t "${TOPIC_BUTTON}" -m off
+	fi
+done

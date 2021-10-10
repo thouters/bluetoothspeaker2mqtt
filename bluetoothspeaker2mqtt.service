@@ -1,0 +1,22 @@
+# --------------------------------------------------------------------------
+# Unit definition for the pi-btaudio.service.
+#
+# Author: Bernhard Bablok
+# License: GPL3
+#
+# Website: https://github.com/bablokb/pi-btaudio
+#
+# --------------------------------------------------------------------------
+
+[Unit]
+Description=expose bluetoothspeaker on mqtt
+Requires=bluez-alsa.service
+After=bluez-alsa.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/bluetoothspeaker2mqtt.conf
+ExecStart=/usr/local/bin/bluetoothspeaker2mqtt
+[Install]
+WantedBy=bluetooth.target

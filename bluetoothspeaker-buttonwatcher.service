@@ -1,0 +1,22 @@
+# --------------------------------------------------------------------------
+# Unit definition for the pi-btaudio.service.
+#
+# Author: Bernhard Bablok
+# License: GPL3
+#
+# Website: https://github.com/bablokb/pi-btaudio
+#
+# --------------------------------------------------------------------------
+
+[Unit]
+Description=watch speaker button
+Requires=bluez-alsa.service
+After=bluez-alsa.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/bluetoothspeaker2mqtt.conf
+ExecStart=/usr/local/bin/bluetoothspeaker-buttonwatcher
+[Install]
+WantedBy=bluetooth.target
