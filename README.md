@@ -1,6 +1,13 @@
 # Scripts to expose a bluetooth speaker on headless linux systems via MQTT
 
+
 ## Summary
+
+To use my Bluetooth speaker with [my Home Assistant controlled Multi-room audio set-up](https://www.thouters.be/HassMultiRoomAudio.html),
+I added a shell script that exposes Bluetooth connection status reporting and triggers over MQTT.
+
+You can find the complete instructions on [how to set up Debian with this script in my article about
+how I run a snapcast client with MQTT controlled Bluetooth speaker on a raspberry pi](https://www.thouters.be/BluetoothSpeakerOnDebianSid.html)
 
 ### bluetoothspeaker2mqtt 
 
