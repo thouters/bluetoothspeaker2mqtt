@@ -5,14 +5,60 @@
 # -P mqttpassword
 # apt install expect mosquitto-clients # unbuffer, mosquitto_*
 set -e
-MAC=$(sed -n '/device/s/[^"]*"\([^"]*\)"/\1/p' /etc/asound.conf)
+# The speaker's MAC: from SPEAKER_MAC, or else from the bluealsa device in /etc/asound.conf
+: "${SPEAKER_MAC:=$(sed -n '/device/s/[^"]*"\([^"]*\)"/\1/p' /etc/asound.conf)}"
+MAC="${SPEAKER_MAC:?set SPEAKER_MAC or the bluealsa device in /etc/asound.conf}"
 : "${TOPIC_STATE:=bluetoothspeaker2mqtt/myspeaker/state}"
 : "${TOPIC_SET:=bluetoothspeaker2mqtt/myspeaker/set}"
+: "${TOPIC_BUTTON:=bluetoothspeaker2mqtt/myspeaker/button}"
+: "${TOPIC_AVAILABILITY:=bluetoothspeaker2mqtt/myspeaker/availability}"
 : "${SNAPCLIENT_SERVICE:=snapclient-bluetooth}"
 : "${STARTSTOP_SNAPCLIENT:=yes}"
 : "${BUTTONWATCHER_SERVICE:=bluetoothspeaker-buttonwatcher}"
 : "${STARTSTOP_BUTTONWATCHER:=yes}"
 : "${POST_CONNECT_SETTLE_TIME:=1}"
+# Home Assistant MQTT discovery: a switch for the link, and device triggers for the button
+: "${HA_DISCOVERY:=yes}"
+: "${HA_DISCOVERY_PREFIX:=homeassistant}"
+: "${HA_NAME:=Bluetooth speaker}"
+NODE_ID="bluetoothspeaker_$(echo "$MAC" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+
+function services()
+{
+	[[ "$STARTSTOP_SNAPCLIENT" = yes ]] && systemctl "$1" "${SNAPCLIENT_SERVICE}"
+	[[ "$STARTSTOP_BUTTONWATCHER" = yes ]] && systemctl "$1" "${BUTTONWATCHER_SERVICE}"
+	true
+}
+
+function connected()
+{
+	echo Connected!
+	mosquitto_pub -r -t "${TOPIC_STATE}" -m on
+	sleep "$POST_CONNECT_SETTLE_TIME"
+	services start
+}
+
+function disconnected()
+{
+	echo Disconnected!
+	mosquitto_pub -r -t "${TOPIC_STATE}" -m off
+	services stop
+}
+
+function ha_discovery()
+{
+	local device availability trigger type payload
+	device="\"device\":{\"identifiers\":[\"${NODE_ID}\"],\"name\":\"${HA_NAME}\",\"connections\":[[\"bluetooth\",\"${MAC}\"]]}"
+	availability="\"availability_topic\":\"${TOPIC_AVAILABILITY}\""
+	mosquitto_pub -r -t "${HA_DISCOVERY_PREFIX}/switch/${NODE_ID}/link/config" -m \
+		"{\"name\":\"Bluetooth link\",\"unique_id\":\"${NODE_ID}_link\",\"icon\":\"mdi:bluetooth-audio\",\"command_topic\":\"${TOPIC_SET}\",\"state_topic\":\"${TOPIC_STATE}\",\"payload_on\":\"on\",\"payload_off\":\"off\",${availability},${device}}"
+	for trigger in "button_short_press on" "button_short_release off"
+	do
+		read -r type payload <<< "$trigger"
+		mosquitto_pub -r -t "${HA_DISCOVERY_PREFIX}/device_automation/${NODE_ID}/${type}/config" -m \
+			"{\"automation_type\":\"trigger\",\"topic\":\"${TOPIC_BUTTON}\",\"payload\":\"${payload}\",\"type\":\"${type}\",\"subtype\":\"button_1\",${device}}"
+	done
+}
 
 function bluetooth_event_listener()
 {
@@ -35,18 +81,11 @@ function bluetooth_event_listener()
         then
                 if echo "$line" |grep -q "Connected: yes"
                 then
-                        echo Connected!
-                        mosquitto_pub -t "${TOPIC_STATE}" -m on
-			sleep "$POST_CONNECT_SETTLE_TIME"
-        		[[ "$STARTSTOP_SNAPCLIENT" = yes ]] && systemctl start "${SNAPCLIENT_SERVICE}"
-        		[[ "$STARTSTOP_BUTTONWATCHER" = yes ]] && systemctl start "${BUTTONWATCHER_SERVICE}"
+                        connected
                 fi
                 if echo "$line" |grep -q "Connected: no"
                 then
-                        echo Disconnected!
-                        mosquitto_pub -t "${TOPIC_STATE}" -m off
-        		[[ "$STARTSTOP_SNAPCLIENT" = yes ]] && systemctl stop "${SNAPCLIENT_SERVICE}"
-        		[[ "$STARTSTOP_BUTTONWATCHER" = yes ]] && systemctl stop "${BUTTONWATCHER_SERVICE}"
+                        disconnected
                 fi
         fi
   done
@@ -61,7 +100,9 @@ function bluetoothctl_cmd()
 
 function mqtt_listener()
 {
-mosquitto_sub -t "${TOPIC_SET}" -v |while read -r message
+# The broker marks us offline when this connection drops
+mosquitto_sub -t "${TOPIC_SET}" -v \
+	--will-topic "${TOPIC_AVAILABILITY}" --will-payload offline --will-retain |while read -r message
 do
     topic=$(echo "$message"|cut -d' ' -f 1)
     payload=$(echo "$message"|cut -d' ' -f 2)
@@ -87,6 +128,21 @@ do
     esac
 done
 }
-bluetooth_event_listener &
+
+[[ "$HA_DISCOVERY" = yes ]] && ha_discovery
 mqtt_listener &
-wait
+bluetooth_event_listener &
+sleep 1
+mosquitto_pub -r -t "${TOPIC_AVAILABILITY}" -m online
+# bluetoothctl only reports changes: start from the current state
+if bluetoothctl info "$MAC" | grep -q "Connected: yes"
+then
+	connected
+else
+	disconnected
+fi
+# Exit when either listener stops, so that systemd restarts us
+wait -n || true
+echo "A listener stopped, exiting"
+mosquitto_pub -r -t "${TOPIC_AVAILABILITY}" -m offline || true
+exit 1

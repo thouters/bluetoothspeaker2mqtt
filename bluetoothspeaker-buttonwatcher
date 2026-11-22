@@ -7,7 +7,7 @@
 set -ex
 : "${TOPIC_BUTTON:=bluetoothspeaker2mqtt/myspeaker/button}"
 : "${SPEAKER_NAME:="MY SPEAKER"}"
-[[ $EUID -eq 0 ]] || (echo "need root to cat /proc/bus/..." ; exit 1)
+[[ $EUID -eq 0 ]] || { echo "need root to cat /proc/bus/..." ; exit 1; }
 MATCH=0
 DEVICEFILE=""
 while read -r line
@@ -31,16 +31,18 @@ do
 	fi
 done <<< "$(cat /proc/bus/input/devices)"
 echo "will listen to $DEVICEFILE"
-test -z "${DEVICEFILE}" && (echo Device not found! ; exit 1)
+# { } and not ( ): exit from a subshell would not stop the script
+[[ -n "${DEVICEFILE}" ]] || { echo "Device not found!" ; exit 1; }
 unbuffer evtest "${DEVICEFILE}" | while read -r line
 do
 	echo "$line"
-	if echo "$line" |grep -q "value 1"
+	# Only key events: "Event: time ..., type 1 (EV_KEY), code 200 (KEY_PLAYCD), value 1"
+	if echo "$line" |grep -qE "EV_KEY.*value 1$"
 	then
 		echo button on
 		mosquitto_pub -t "${TOPIC_BUTTON}" -m on
 	fi
-	if echo "$line" |grep -q "value 0"
+	if echo "$line" |grep -qE "EV_KEY.*value 0$"
 	then
 		echo button off
 		mosquitto_pub -t "${TOPIC_BUTTON}" -m off

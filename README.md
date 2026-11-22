@@ -45,17 +45,29 @@ sudo systemctl daemon-reload
 write a file `/etc/bluetoothspeaker2mqtt.conf`, add settings you want to override as key/value pairs. Available are:
 
 ```bash
-TOPIC_BUTTON=""
-SPEAKER_NAME=""
-TOPIC_STATE=""
-TOPIC_SET=""
-SNAPCLIENT=""
+SPEAKER_MAC=""              # default: the bluealsa device in /etc/asound.conf
+SPEAKER_NAME=""             # the input device name in /proc/bus/input/devices, e.g. "JBL Charge 4 (AVRCP)"
+TOPIC_STATE=""              # on/off, retained
+TOPIC_SET=""                # write on/off to connect/disconnect
+TOPIC_BUTTON=""             # on/off when the speaker's button is pressed/released
+TOPIC_AVAILABILITY=""       # online/offline, retained
+SNAPCLIENT_SERVICE=""
 STARTSTOP_SNAPCLIENT=""
 BUTTONWATCHER_SERVICE=""
 STARTSTOP_BUTTONWATCHER=""
 POST_CONNECT_SETTLE_TIME=""
-
+HA_DISCOVERY=""             # yes (default) or no
+HA_DISCOVERY_PREFIX=""      # default: homeassistant
+HA_NAME=""                  # the device name in Home Assistant, default: Bluetooth speaker
 ```
+
+### Home Assistant
+
+With `HA_DISCOVERY=yes` (the default), bluetoothspeaker2mqtt announces the speaker
+through [MQTT discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery):
+a device with a "Bluetooth link" switch (connect/disconnect, and the connection
+state), and device triggers for pressing and releasing the button. No YAML needed.
+The availability topic goes offline when bluetoothspeaker2mqtt stops.
 
 Write a file `/root/.config/mosquitto_pub` with MQTT configuration, verify you don't have trailing newlines.
 ```
