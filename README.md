@@ -22,7 +22,41 @@ A simple shell script that will watch evtest output from the bluetooth buttons. 
 
 Service files to automatically start bluetoothspeaker2mqtt, and to have bluetoothspeaker2mqtt start/stop a snapclient, and bluetoothspeaker-buttonwatcher
 
-## Installation
+## NixOS
+
+The flake has a NixOS module that sets up bluez, bluez-alsa, the scripts and a snapclient:
+
+```nix
+{
+  inputs.bluetoothspeaker2mqtt = {
+    url = "github:thouters/bluetoothspeaker2mqtt";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  # in nixosSystem's modules: bluetoothspeaker2mqtt.nixosModules.default, and
+  services.bluetoothspeaker2mqtt = {
+    enable = true;
+    speaker = {
+      mac = "04:21:44:D0:59:56";
+      inputName = "JBL Charge 4 (AVRCP)";   # for the button; /proc/bus/input/devices
+      mixer = "JBL Charge 4 A2DP";          # amixer -D bluealsa scontrols
+    };
+    mqtt = {
+      host = "mqtt.example.org";
+      user = "mqtt";
+      passwordFile = "/run/secrets/mqtt-password";
+    };
+    topic = "bluetoothspeaker2mqtt/bluetooth";
+    homeAssistant.name = "JBL Charge 4";
+    snapclient.server = "tcp://snapcast.example.org";
+  };
+}
+```
+
+Pair the speaker once by hand: `bluetoothctl`, then `scan on`, `pair <MAC>`, `trust <MAC>`,
+`connect <MAC>`. See `nixos-module.nix` for all options.
+
+## Installation on Debian
 
 ### prerequisites
 
